@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <meta name="description" content="线上电子名片 - 可在本机编辑并生成线上二维码，部署后访客扫码访问名片页面。">
+    <title>线上电子名片</title>
+
+    <!-- QR 生成库 和 Tailwind CSS（生产环境建议用本地或固定 CDN 版本） -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        .card-shadow { box-shadow: 0 8px 30px rgba(30, 64, 175, 0.15); }
+        .input-focus:focus { border-color: #2563eb; outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2); }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen py-6 px-3">
+    <div class="max-w-5xl mx-auto">
+        <div class="flex justify-center gap-3 mb-6 flex-wrap">
+            <button id="editBtn" class="px-4 py-3 bg-blue-600 text-white rounded-lg w-full md:w-auto">编辑我的名片（仅本机）</button>
+            <button id="viewBtn" class="px-4 py-3 border border-blue-600 text-blue-600 rounded-lg w-full md:w-auto">访客预览模式</button>
+        </div>
+
+        <!-- 编辑页面 -->
+        <div id="editPage" class="hidden">
+            <div class="grid md:grid-cols-2 gap-6">
+                <div class="bg-white rounded-xl p-5 card-shadow">
+                    <h2 class="text-lg font-bold mb-4">个人信息编辑</h2>
+                    <div class="space-y-3">
+                        <input type="text" id="name" placeholder="姓名" class="w-full p-2 border rounded-lg input-focus" autocomplete="name">
+                        <input type="text" id="job" placeholder="职位" class="w-full p-2 border rounded-lg input-focus" autocomplete="organization-title">
+                        <input type="text" id="company" placeholder="公司" class="w-full p-2 border rounded-lg input-focus" autocomplete="organization">
+                        <input type="tel" id="phone" placeholder="手机号" class="w-full p-2 border rounded-lg input-focus" autocomplete="tel">
+                        <input type="email" id="email" placeholder="邮箱" class="w-full p-2 border rounded-lg input-focus" autocomplete="email">
+                        <input type="text" id="wechat" placeholder="微信号" class="w-full p-2 border rounded-lg input-focus">
+                        <textarea id="desc" rows="3" placeholder="个人简介" class="w-full p-2 border rounded-lg input-focus"></textarea>
+                        <button id="saveBtn" class="w-full py-3 bg-green-500 text-white rounded-lg">保存信息并生成线上二维码</button>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="bg-white rounded-xl p-5 card-shadow mb-4">
+                        <h3 class="font-semibold mb-3">名片预览</h3>
+                        <div id="cardPreview" class="border p-4 rounded-lg">保存信息后预览</div>
+                    </div>
+
+                    <div class="bg-white rounded-xl p-5 card-shadow">
+                        <h3 class="font-semibold mb-3 text-center">线上名片二维码（公网链接）</h3>
+                        <div class="flex justify-center"><canvas id="qrCanvas" width="380" height="380" aria-label="名片二维码"></canvas></div>
+                        <p class="text-sm text-gray-500 text-center mt-3">扫码打开网页名片，无需登录</p>
+                        <button id="downloadQr" class="w-full mt-3 py-2 bg-blue-500 text-white rounded-lg hidden">下载二维码</button>
+
+                        <div class="mt-4">
+                            <p class="text-sm font-medium mb-2">分享链接（部署后为公网 https 链接）：</p>
+                            <div class="flex">
+                                <input id="shareUrl" readonly class="flex-1 border p-2 text-sm bg-gray-50 rounded-l-lg" aria-label="分享链接">
+                                <button id="copyUrl" class="px-3 py-2 bg-gray-700 text-white rounded-r-lg">复制</button>
+                            </div>
+                            <p class="text-xs text-red-500 mt-2">⚠️ 本地打开生成的链接是本地路径，手机无法打开，必须上传网站部署到公网后才能手机访问</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 访客只读页面 -->
+        <div id="viewPage" class="hidden max-w-md mx-auto">
+            <div class="bg-white rounded-xl p-6 card-shadow">
+                <div id="visitorCard">暂无名片信息，请切换编辑页填写</div>
+            </div>
+            <p class="text-center text-gray-400 mt-4 text-sm">访客仅可查看，无编辑权限</p>
+        </div>
+    </div>
+
+    <script>
+        // DOM 元素
+        const editPage = document.getElementById('editPage');
+        const viewPage = document.getElementById('viewPage');
+        const editBtn = document.getElementById('editBtn');
+        const viewBtn = document.getElementById('viewBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const downloadQr = document.getElementById('downloadQr');
+        const qrCanvas = document.getElementById('qrCanvas');
+        const shareUrlInput = document.getElementById('shareUrl');
+        const copyUrlBtn = document.getElementById('copyUrl');
+        const cardPreview = document.getElementById('cardPreview');
+        const visitorCard = document.getElementById('visitorCard');
+
+        // 本地存储 key（版本号可更新）
+        const STORAGE_KEY = 'card_data_2026';
+        let cardData = JSON.parse(localStorage.getItem(STORAGE_KEY)) || null;
+
+        // 公网地址：默认使用当前页面地址（部署到服务器后即为公网链接）
+        const publicUrl = window.location.origin + window.location.pathname;
+
+        // 切换视图
+        editBtn.onclick = () => {
+            editPage.classList.remove('hidden');
+            viewPage.classList.add('hidden');
+            fillForm();
+        }
+        viewBtn.onclick = () => {
+            editPage.classList.add('hidden');
+            viewPage.classList.remove('hidden');
+            renderVisitor();
+        }
+
+        // 填充表单（页面载入或切换时）
+        function fillForm() {
+            if (!cardData) return;
+            document.getElementById('name').value = cardData.name || '';
+            document.getElementById('job').value = cardData.job || '';
+            document.getElementById('company').value = cardData.company || '';
+            document.getElementById('phone').value = cardData.phone || '';
+            document.getElementById('email').value = cardData.email || '';
+            document.getElementById('wechat').value = cardData.wechat || '';
+            document.getElementById('desc').value = cardData.desc || '';
+            renderPreview();
+            createQr();
+        }
+
+        // 保存并生成二维码
+        saveBtn.onclick = () => {
+            cardData = {
+                name: document.getElementById('name').value.trim(),
+                job: document.getElementById('job').value.trim(),
+                company: document.getElementById('company').value.trim(),
+                phone: document.getElementById('phone').value.trim(),
+                email: document.getElementById('email').value.trim(),
+                wechat: document.getElementById('wechat').value.trim(),
+                desc: document.getElementById('desc').value.trim()
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(cardData));
+            shareUrlInput.value = publicUrl;
+            renderPreview();
+            createQr();
+            alert('保存成功！本地链接手机无法访问，上传网站部署后生成二维码才能手机打开');
+        }
+
+        // 生成名片 HTML
+        function buildCardHtml(data) {
+            return `
+                <div class="text-center mb-4">
+                    <h2 class="text-xl font-bold text-gray-900">${data.name || ''}</h2>
+                    <p class="text-blue-600 font-medium">${data.job || ''}</p>
+                    <p class="text-gray-500 text-sm">${data.company || ''}</p>
+                </div>
+                <div class="border-t my-4"></div>
+                <div class="space-y-2 text-sm">
+                    ${data.phone ? `<div>📞 <a href="tel:${data.phone}" class="text-blue-600">${data.phone}</a></div>` : ''}
+                    ${data.email ? `<div>✉️ <a href="mailto:${data.email}" class="text-blue-600">${data.email}</a></div>` : ''}
+                    ${data.wechat ? `<div>💬 微信号：${data.wechat}</div>` : ''}
+                </div>
+                ${data.desc ? `<div class="border-t my-4 pt-3 text-gray-600 text-sm">${data.desc}</div>` : ''}
+            `;
+        }
+
+        // 预览（编辑者）
+        function renderPreview() {
+            cardPreview.innerHTML = cardData?.name ? buildCardHtml(cardData) : '<p class="text-gray-400 text-center">保存信息后预览</p>';
+        }
+
+        // 访客视图
+        function renderVisitor() {
+            visitorCard.innerHTML = cardData?.name ? buildCardHtml(cardData) : '<p class="text-gray-400 text-center">暂无名片信息</p>';
+        }
+
+        // 使用 qrcode 库生成二维码到 canvas
+        function createQr() {
+            QRCode.toCanvas(qrCanvas, publicUrl, {
+                width: 380,
+                margin: 16,
+                errorCorrectionLevel: 'H',
+                color: { dark: '#000', light: '#fff' }
+            }, err => {
+                if (!err) {
+                    downloadQr.classList.remove('hidden');
+                    shareUrlInput.value = publicUrl;
+                } else {
+                    console.error('二维码生成失败：', err);
+                }
+            });
+        }
+
+        // 下载二维码图片
+        downloadQr.onclick = () => {
+            const a = document.createElement('a');
+            a.download = '线上电子名片二维码.png';
+            a.href = qrCanvas.toDataURL('image/png', 1);
+            a.click();
+        }
+
+        // 复制链接到剪贴板
+        copyUrlBtn.onclick = async () => {
+            try {
+                await navigator.clipboard.writeText(publicUrl);
+                alert('链接已复制，仅在部署后的公网链接手机可打开');
+            } catch (e) {
+                alert('复制失败，请手动复制链接：' + publicUrl);
+            }
+        }
+
+        // 页面加载时打开编辑页并填充（若有保存数据）
+        window.onload = () => {
+            editPage.classList.remove('hidden');
+            fillForm();
+        }
+    </script>
+</body>
+</html>
