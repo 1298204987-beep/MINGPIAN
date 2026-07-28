@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <!-- 强制手机完美适配，无横向滚动 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>vCard标准电子名片生成器（扫码直接显示完整信息）</title>
+    <!-- 二维码库 -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <!-- 样式框架 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {box-sizing: border-box;}
+        body {background-color: #f3f4f6;min-height: 100vh;}
+        .card-shadow {box-shadow: 0 8px 30px rgba(30, 64, 175, 0.15);}
+        .input-focus:focus {border-color: #2563eb;outline: none;box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);}
+        /* 手机自适应布局 */
+        @media (max-width:768px) {
+            .grid {grid-template-columns: 1fr !important;}
+            .page-padding {padding:12px !important;}
+        }
+    </style>
+</head>
+<body class="py-6 px-3 page-padding">
+    <div class="max-w-3xl mx-auto">
+        <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-800 mb-6">vCard标准电子名片生成器</h1>
+        <p class="text-center text-green-600 text-sm mb-6">扫码自动弹出完整名片，支持超长文字，微信/相机100%兼容</p>
+
+        <div class="grid md:grid-cols-2 gap-6">
+            <!-- 左侧信息填写区（支持大量文字） -->
+            <div class="bg-white rounded-xl p-5 card-shadow">
+                <h2 class="text-lg font-semibold mb-4">填写你的全部信息</h2>
+                <div class="space-y-3">
+                    <input type="text" id="fullName" placeholder="姓名（必填）" class="w-full p-2 border rounded-lg input-focus">
+                    <input type="text" id="jobTitle" placeholder="职位" class="w-full p-2 border rounded-lg input-focus">
+                    <input type="text" id="company" placeholder="公司/单位名称" class="w-full p-2 border rounded-lg input-focus">
+                    <input type="tel" id="phoneNum" placeholder="手机号码" class="w-full p-2 border rounded-lg input-focus">
+                    <input type="email" id="emailAddr" placeholder="电子邮箱" class="w-full p-2 border rounded-lg input-focus">
+                    <input type="text" id="wechatId" placeholder="微信号" class="w-full p-2 border rounded-lg input-focus">
+                    <input type="text" id="website" placeholder="个人网址/公众号链接（选填）" class="w-full p-2 border rounded-lg input-focus">
+                    <!-- 超大文本框，支持大量文字简介、履历 -->
+                    <textarea id="longDesc" rows="6" placeholder="超长个人简介、从业经历、业务介绍（可写几百字）" class="w-full p-2 border rounded-lg input-focus"></textarea>
+                    
+                    <button id="generateBtn" class="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium mt-2">生成兼容全手机名片二维码</button>
+                </div>
+            </div>
+
+            <!-- 右侧二维码+预览区 -->
+            <div class="bg-white rounded-xl p-5 card-shadow">
+                <h2 class="text-lg font-semibold mb-4 text-center">专属名片二维码</h2>
+                <div class="flex justify-center">
+                    <canvas id="qrCanvas" width="420" height="420"></canvas>
+                </div>
+                <p class="text-sm text-gray-500 text-center mt-4">保存图片到相册再扫码，识别更稳定</p>
+                <button id="downloadBtn" class="w-full mt-4 py-2 bg-green-500 text-white rounded-lg hidden">下载高清二维码图片</button>
+            </div>
+        </div>
+
+        <!-- 完整名片预览（超长文字完整展示） -->
+        <div class="mt-6 bg-white p-5 rounded-xl card-shadow">
+            <h3 class="font-semibold mb-3">名片完整预览（扫码后手机显示效果）</h3>
+            <div id="cardPreview" class="border p-4 rounded-lg text-gray-700 whitespace-pre-wrap">填写信息并生成二维码后在此预览全部内容</div>
+        </div>
+    </div>
+
+    <script>
+        // DOM元素绑定
+        const generateBtn = document.getElementById('generateBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const qrCanvas = document.getElementById('qrCanvas');
+        const cardPreview = document.getElementById('cardPreview');
+
+        // 生成vCard标准格式（手机扫码专用，解决空白不显示问题）
+        generateBtn.addEventListener('click', () => {
+            // 获取所有输入内容
+            const name = document.getElementById('fullName').value.trim();
+            const job = document.getElementById('jobTitle').value.trim();
+            const company = document.getElementById('company').value.trim();
+            const tel = document.getElementById('phoneNum').value.trim();
+            const mail = document.getElementById('emailAddr').value.trim();
+            const wechat = document.getElementById('wechatId').value.trim();
+            const site = document.getElementById('website').value.trim();
+            const desc = document.getElementById('longDesc').value.trim();
+
+            if (!name) {
+                alert('请至少填写姓名才能生成名片！');
+                return;
+            }
+
+            // 标准vCard 3.0格式，所有手机扫码自动解析，不会空白乱码
+            let vcardText = `BEGIN:VCARD
+VERSION:3.0
+FN:${name}
+TITLE:${job}
+ORG:${company}
+TEL;TYPE=CELL:${tel}
+EMAIL:${mail}
+URL:${site}
+NOTE:微信号：${wechat}
+个人简介/履历：${desc}
+END:VCARD`;
+
+            // 预览美化展示
+            let showText = `===== 个人电子名片 =====
+姓名：${name}
+职位：${job}
+单位：${company}
+手机：${tel}
+邮箱：${mail}
+微信号：${wechat}
+个人链接：${site}
+
+【详细介绍】
+${desc}`;
+            cardPreview.innerText = showText;
+
+            // 二维码终极优化参数，杜绝识别失败
+            QRCode.toCanvas(qrCanvas, vcardText, {
+                width: 420,        // 超大画布高清
+                margin: 20,        // 超大白边，相机定位必备
+                errorCorrectionLevel: 'H', // 最高30%容错，遮挡模糊也能扫
+                color: {
+                    dark: '#000000', // 纯黑高对比度
+                    light: '#ffffff'
+                }
+            }, function (err) {
+                if (err) {
+                    console.error('二维码生成错误：', err);
+                    alert('生成失败，请简化简介文字后重试');
+                    return;
+                }
+                // 生成成功显示下载按钮
+                downloadBtn.classList.remove('hidden');
+                alert('二维码生成完成！直接用微信/相机扫码，自动弹出完整名片，超长文字全部正常显示');
+            })
+        })
+
+        // 下载无压缩高清二维码
+        downloadBtn.addEventListener('click', () => {
+            const aTag = document.createElement('a');
+            aTag.download = '个人标准电子名片.png';
+            aTag.href = qrCanvas.toDataURL('image/png', 1.0); // 100%无损画质
+            aTag.click();
+        })
+    </script>
+</body>
+</html>
